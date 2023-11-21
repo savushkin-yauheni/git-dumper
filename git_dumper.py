@@ -31,8 +31,8 @@ def printf(fmt, *args, file=sys.stdout):
 def is_html(response):
     """ Return True if the response is a HTML webpage """
     return (
-        "Content-Type" in response.headers
-        and "text/html" in response.headers["Content-Type"]
+            "Content-Type" in response.headers
+            and "text/html" in response.headers["Content-Type"]
     )
 
 
@@ -43,11 +43,17 @@ def is_safe_path(path):
 
     safe_path = os.path.expanduser("~")
     return (
-        os.path.commonpath(
-            (os.path.realpath(os.path.join(safe_path, path)), safe_path)
-        )
-        == safe_path
+            os.path.commonpath(
+                (os.path.realpath(os.path.join(safe_path, path)), safe_path)
+            )
+            == safe_path
     )
+
+
+def prepare_request(url: str):
+    prep = requests.Request(method='GET', url=url).prepare()
+    prep.url = url
+    return prep
 
 
 def get_indexed_files(response):
@@ -59,10 +65,10 @@ def get_indexed_files(response):
         url = urllib.parse.urlparse(link.get("href"))
 
         if (
-            url.path
-            and is_safe_path(url.path)
-            and not url.scheme
-            and not url.netloc
+                url.path
+                and is_safe_path(url.path)
+                and not url.scheme
+                and not url.netloc
         ):
             files.append(url.path)
 
@@ -78,13 +84,13 @@ def verify_response(response):
             ),
         )
     elif (
-        "Content-Length" in response.headers
-        and response.headers["Content-Length"] == 0
+            "Content-Length" in response.headers
+            and response.headers["Content-Length"] == 0
     ):
         return False, "[-] %s/%s responded with a zero-length body\n"
     elif (
-        "Content-Type" in response.headers
-        and "text/html" in response.headers["Content-Type"]
+            "Content-Type" in response.headers
+            and "text/html" in response.headers["Content-Type"]
     ):
         return False, "[-] %s/%s responded with HTML\n"
     else:
@@ -235,12 +241,12 @@ class DownloadWorker(Worker):
             return []
 
         with closing(
-            self.session.get(
-                "%s/%s" % (url, filepath),
-                allow_redirects=False,
-                stream=True,
-                timeout=timeout,
-            )
+                self.session.send(
+                    prepare_request("%s/%s" % (url, filepath)),
+                    allow_redirects=False,
+                    stream=True,
+                    timeout=timeout,
+                )
         ) as response:
             printf(
                 "[-] Fetching %s/%s [%d]\n",
@@ -274,12 +280,12 @@ class RecursiveDownloadWorker(DownloadWorker):
             return []
 
         with closing(
-            self.session.get(
-                "%s/%s" % (url, filepath),
-                allow_redirects=False,
-                stream=True,
-                timeout=timeout,
-            )
+                self.session.send(
+                    prepare_request("%s/%s" % (url, filepath)),
+                    allow_redirects=False,
+                    stream=True,
+                    timeout=timeout,
+                )
         ) as response:
             printf(
                 "[-] Fetching %s/%s [%d]\n",
@@ -289,9 +295,9 @@ class RecursiveDownloadWorker(DownloadWorker):
             )
 
             if (
-                response.status_code in (301, 302)
-                and "Location" in response.headers
-                and response.headers["Location"].endswith(filepath + "/")
+                    response.status_code in (301, 302)
+                    and "Location" in response.headers
+                    and response.headers["Location"].endswith(filepath + "/")
             ):
                 return [filepath + "/"]
 
@@ -323,8 +329,8 @@ class FindRefsWorker(DownloadWorker):
     """ Find refs/ """
 
     def do_task(self, filepath, url, directory, retry, timeout, http_headers):
-        response = self.session.get(
-            "%s/%s" % (url, filepath), allow_redirects=False, timeout=timeout
+        response = self.session.send(
+            prepare_request("%s/%s" % (url, filepath)), allow_redirects=False, timeout=timeout
         )
         printf(
             "[-] Fetching %s/%s [%d]\n", url, filepath, response.status_code
@@ -346,7 +352,7 @@ class FindRefsWorker(DownloadWorker):
         tasks = []
 
         for ref in re.findall(
-            r"(refs(/[a-zA-Z0-9\-\.\_\*]+)+)", response.text
+                r"(refs(/[a-zA-Z0-9\-\.\_\*]+)+)", response.text
         ):
             ref = ref[0]
             if not ref.endswith("*") and is_safe_path(ref):
@@ -365,8 +371,8 @@ class FindObjectsWorker(DownloadWorker):
         if os.path.isfile(os.path.join(directory, filepath)):
             printf("[-] Already downloaded %s/%s\n", url, filepath)
         else:
-            response = self.session.get(
-                "%s/%s" % (url, filepath),
+            response = self.session.send(
+                prepare_request("%s/%s" % (url, filepath)),
                 allow_redirects=False,
                 timeout=timeout,
             )
@@ -395,7 +401,7 @@ class FindObjectsWorker(DownloadWorker):
         return get_referenced_sha1(obj_file)
 
 
-def fetch_git(url, directory, jobs, retry, timeout, http_headers):
+def fetch_git(url, directory, jobs, retry, timeout, http_headers, path_as_is):
     """ Dump a git repository into the output directory """
 
     assert os.path.isdir(directory), "%s is not a directory" % directory
@@ -411,18 +417,21 @@ def fetch_git(url, directory, jobs, retry, timeout, http_headers):
     if os.listdir(directory):
         printf("Warning: Destination '%s' is not empty\n", directory)
 
-    # find base url
-    url = url.rstrip("/")
-    if url.endswith("HEAD"):
-        url = url[:-4]
-    url = url.rstrip("/")
-    if url.endswith(".git"):
-        url = url[:-4]
-    url = url.rstrip("/")
+    if not path_as_is:
+        # find base url
+        url = url.rstrip("/")
+        if url.endswith("HEAD"):
+            url = url[:-4]
+        url = url.rstrip("/")
+        if url.endswith(".git"):
+            url = url[:-4]
+        url = url.rstrip("/")
+    else:
+        url = url.rstrip("/")
 
     # check for /.git/HEAD
     printf("[-] Testing %s/.git/HEAD ", url)
-    response = session.get("%s/.git/HEAD" % url, allow_redirects=False)
+    response = session.send(prepare_request("%s/.git/HEAD" % url), allow_redirects=False)
     printf("[%d]\n", response.status_code)
 
     valid, error_message = verify_response(response)
@@ -439,13 +448,13 @@ def fetch_git(url, directory, jobs, retry, timeout, http_headers):
 
     # check for directory listing
     printf("[-] Testing %s/.git/ ", url)
-    response = session.get("%s/.git/" % url, allow_redirects=False)
+    response = session.send(prepare_request("%s/.git/" % url), allow_redirects=False)
     printf("[%d]\n", response.status_code)
 
     if (
-        response.status_code == 200
-        and is_html(response)
-        and "HEAD" in get_indexed_files(response)
+            response.status_code == 200
+            and is_html(response)
+            and "HEAD" in get_indexed_files(response)
     ):
         printf("[-] Fetching .git recursively\n")
         process_tasks(
@@ -554,12 +563,12 @@ def fetch_git(url, directory, jobs, retry, timeout, http_headers):
         os.path.join(directory, ".git", "ORIG_HEAD"),
     ]
     for dirpath, _, filenames in os.walk(
-        os.path.join(directory, ".git", "refs")
+            os.path.join(directory, ".git", "refs")
     ):
         for filename in filenames:
             files.append(os.path.join(dirpath, filename))
     for dirpath, _, filenames in os.walk(
-        os.path.join(directory, ".git", "logs")
+            os.path.join(directory, ".git", "logs")
     ):
         for filename in filenames:
             files.append(os.path.join(dirpath, filename))
@@ -663,6 +672,7 @@ def main():
         action="append",
         help="additional http headers, e.g `NAME=VALUE`",
     )
+    parser.add_argument('--path-as-is', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     # jobs
@@ -717,6 +727,8 @@ def main():
     if not os.path.isdir(args.directory):
         parser.error("`%s` is not a directory" % args.directory)
 
+    path_as_is = bool(args.path_as_is)
+
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # fetch everything
@@ -728,6 +740,7 @@ def main():
             args.retry,
             args.timeout,
             http_headers,
+            path_as_is,
         )
     )
 

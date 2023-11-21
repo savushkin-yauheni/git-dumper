@@ -23,6 +23,7 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   --proxy PROXY         use the specified proxy
+  --path-as-is          https://dev.example.com/XXXX/..
   -j JOBS, --jobs JOBS  number of simultaneous requests
   -r RETRY, --retry RETRY
                         number of request attempts before giving up
